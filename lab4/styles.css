@@ -1,0 +1,50 @@
+.content {
+    width: 70%;
+    margin: auto;
+    padding-bottom: 30px;
+    padding-top: 50px;
+    text-align: center;
+    font-size: 120%;
+  }
+  
+  body {
+    background-image: url('background.jpg');
+    background-image: cover;
+  }
+  
+  .footer {
+    position: fixed;
+    left: 0;
+    bottom: 0;
+    width: 100%;
+    background-color: #1d6b91;
+    color: #F9F5FF;
+    text-align: center;
+  }
+  
+  a.footer-link {
+    color: #F9F5FF;
+  }
+  
+  #selector {
+    margin-bottom: 10px;
+    margin-right: 10px;
+    margin-left: 10px;
+  }
+  
+  .pure-button {
+    margin-top: 10px;
+    background-color: #1d6b91;
+  }
+
+  .field {
+    margin-top: 10px;
+    margin-bottom: 10px;
+  }
+  
+  
+  /*desktop, not tablet*/
+  @media only screen and (min-width: 801px) {
+  
+  }
+  

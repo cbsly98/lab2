@@ -10,11 +10,17 @@ ruleset wovyn_base {
                 username = ctx:rid_config{"username"}
                 password = ctx:rid_config{"password"}
                 fromNumber = ctx:rid_config{"fromNumber"}
+        use module sensor_profile alias profile
+        shares getThreshold
       }
 
     global {
-        temperature_threshold = 80
-        phone_number = "+13854502647"
+        getThreshold = function() {
+            profile:getProfileInformation(){"temperature_threshold"}
+        }
+        getPhoneNumber = function() {
+            profile:getProfileInformation(){"phone_number"}
+        }
     }
 
     rule process_heartbeat {
@@ -35,7 +41,7 @@ ruleset wovyn_base {
         pre {
             temperature = event:attrs{"temperature"}
         }
-        if temperature > temperature_threshold then noop();
+        if temperature > getThreshold() then noop();
         fired {
             raise wovyn event "threshold_violation"
                 attributes event:attrs
@@ -47,6 +53,6 @@ ruleset wovyn_base {
         pre {
             messageBody = "Temperature exceeded threshold at " + event:attrs{"timestamp"} + ". Current temperature is " + event:attrs{"temperature"}.klog("message: ")
         }
-        twilio:sendMessage(phone_number, messageBody)
+        twilio:sendMessage(getPhoneNumber(), messageBody)
     }
 }
