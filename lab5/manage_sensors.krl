@@ -6,12 +6,23 @@ ruleset manage_sensors {
         >>
         author "Caleb Sly"
         use module io.picolabs.wrangler alias wrangler
+        use module io.picolabs.subscription alias subs
+        use module management_profile alias profile
+        use module com.twilio alias twilio
+            with 
+                username = ctx:rid_config{"username"}
+                password = ctx:rid_config{"password"}
+                fromNumber = ctx:rid_config{"fromNumber"}
         shares showChildren, sensors, temperatures
       }
 
     global {
         defaultThreshold = 90
         defaultPhoneNumber = "+13854502647"
+
+        getPhoneNumber = function() {
+            profile:getProfileInformation(){"phone_number"}
+        }
         
         rulesetData = {
             "temperature_store" : {
@@ -23,11 +34,11 @@ ruleset manage_sensors {
                 "rid" : "com.twilio"
             },
             "wovyn_base" : {
-                "rulesetURI" : "https://raw.githubusercontent.com/cbsly98/lab2/lab4/wovyn_base.krl",
+                "rulesetURI" : "file:///home/csly/Desktop/Winter2022/cs462/lab2/wovyn_base.krl",
                 "rid" : "wovyn_base"
             },
             "sensor_profile" : {
-                "rulesetURI" : "https://raw.githubusercontent.com/cbsly98/lab2/lab4/lab4/sensor_profile.krl",
+                "rulesetURI" : "file:///home/csly/Desktop/Winter2022/cs462/lab2/lab4/sensor_profile.krl",
                 "rid" : "sensor_profile"
             },
             "emitter" : {
@@ -64,8 +75,10 @@ ruleset manage_sensors {
         }
 
         temperatures = function() {
-            ent:sensors.map(function(v, k) {
-                wrangler:picoQuery(v{"eci"},"temperature_store","temperatures",{})
+            ent:sensors.filter(function(v,k) {
+                v{"Tx_role"} == "temperatureSensor"
+            }).map(function(v, k) {
+                wrangler:picoQuery(v{"subscriptionTx"},"temperature_store","temperatures",{}, v{"host"})
             })
         }
     }
@@ -99,6 +112,7 @@ ruleset manage_sensors {
             }
           fired {
             ent:sensors{sensor_id} := the_sensor
+            ent:sensors{[sensor_id, "host"]} := "http://localhost:3000"
             raise sensor event "rulesets_installed"
                 attributes { "sensor": the_sensor, "sensor_id" : sensor_id }
           }
@@ -125,19 +139,80 @@ ruleset manage_sensors {
             )
     }
 
+    rule accept_wellKnown {
+        select when sensor identify
+          sensor_id re#(.+)#
+          wellKnown_eci re#(.+)#
+          setting(sensor_id,wellKnown_eci)
+        fired {
+          ent:sensors{[sensor_id,"wellKnown_eci"]} := wellKnown_eci
+          raise sensor event "identified"
+            attributes { "sensor_id": sensor_id, "wellKnown_eci" : wellKnown_eci }
+        }
+    }
+
+    rule introduce_sensor {
+        select when sensor introduced
+        pre {
+            sensor_id = event:attrs{"sensor_id"}
+            wellKnown_eci = event:attrs{"wellKnown_eci"}
+            host = event:attrs{"host"}
+        }
+        always {
+            ent:sensors{[sensor_id, "host"]} := host
+            raise wrangler event "subscription"
+                attributes { "wellKnown_Tx": wellKnown_eci, "Rx_role" : "community", "Tx_role" : "temperatureSensor", "name" : "sensorSubscription", "channel_type" : "sensorSubscription", "Tx_host" : host}
+        }
+    }
+
+    rule create_subscription {
+        select when sensor identified
+        pre {
+            sensor_id = event:attrs{"sensor_id"}
+            wellKnown_eci = event:attrs{"wellKnown_eci"}
+        }
+        always {
+            raise wrangler event "subscription"
+                attributes { "wellKnown_Tx": wellKnown_eci, "Rx_role" : "community", "Tx_role" : "temperatureSensor", "name" : "sensorSubscription", "channel_type" : "sensorSubscription"}
+        }
+    }
+
+    rule store_subscription {
+        select when wrangler subscription_added
+        pre {
+            sensor_id = event:attrs{"sensor_id"}
+        }
+        always {
+            ent:sensors{[sensor_id, "subscriptionTx"]} := event:attrs{"Tx"}
+            ent:sensors{[sensor_id, "Tx_role"]} := event:attrs{"Rx_role"}
+            ent:sensors{[sensor_id, "subscriptionId"]} := event:attrs{"Id"}
+        }
+    }
+
     rule delete_sensor {
         select when sensor unneeded_sensor
         pre {
             sensor_id = event:attrs{"sensor_id"}
             exists = ent:sensors >< sensor_id
             eci_to_delete = ent:sensors{[sensor_id,"eci"]}
+            subscriptionId = ent:sensors{[sensor_id, "subscriptionId"]}
         }
         if exists && eci_to_delete then noop();
         fired {
             raise wrangler event "child_deletion_request"
                 attributes {"eci": eci_to_delete};
+            raise wrangler event "subscription_cancellation"
+                attributes {"Id":subscriptionId}
             clear ent:sensors{sensor_id}
         }
+    }
+
+    rule threshold_notification {
+        select when wovyn threshold_violation
+        pre {
+            messageBody = "Temperature exceeded threshold at " + event:attrs{"timestamp"} + ". Current temperature is " + event:attrs{"temperature"}.klog("message: ")
+        }
+        twilio:sendMessage(getPhoneNumber(), messageBody)
     }
 
 }

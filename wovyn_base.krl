@@ -50,9 +50,19 @@ ruleset wovyn_base {
 
     rule threshold_notification {
         select when wovyn threshold_violation
+        foreach profile:getSubscriptionInformation() setting(v, n)
         pre {
-            messageBody = "Temperature exceeded threshold at " + event:attrs{"timestamp"} + ". Current temperature is " + event:attrs{"temperature"}.klog("message: ")
+            tx_role = v{"Tx_role"}
+            host = v{"Tx_host"}
+            tx = v{"Tx"}
         }
-        twilio:sendMessage(getPhoneNumber(), messageBody)
+        if tx_role == "community" then
+            event:send(
+                {   "eci": tx, 
+                    "eid": "threshold-violation", 
+                    "domain": "wovyn", "type": "threshold_violation",
+                    "attrs": event:attrs
+                }
+            )
     }
 }
