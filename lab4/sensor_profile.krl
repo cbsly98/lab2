@@ -5,10 +5,10 @@ ruleset sensor_profile {
         Ruleset for sensor profile
         >>
         author "Caleb Sly"
-        provides getProfileInformation, getSubscriptionInformation
+        provides getProfileInformation, getSubscriptionInformation, getSensorId
         use module io.picolabs.wrangler alias wrangler
         use module io.picolabs.subscription alias subs
-        shares getProfileInformation, getSubscriptionInformation
+        shares getProfileInformation, getSubscriptionInformation, getSensorId
       }
 
     global {
@@ -21,6 +21,10 @@ ruleset sensor_profile {
 
         getSubscriptionInformation = function() {
             ent:subscriptions
+        }
+
+        getSensorId = function() {
+          ent:sensor_id
         }
     }
 

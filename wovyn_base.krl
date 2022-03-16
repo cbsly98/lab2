@@ -31,6 +31,7 @@ ruleset wovyn_base {
         }
         send_directive("The temperature is: " + temperature.klog("directive-sent"))
         always {
+            ent:curr_temp := temperature
             raise wovyn event "new_temperature_reading"
                 attributes {"temperature" : temperature, "timestamp" : timestamp}
         }
@@ -64,5 +65,24 @@ ruleset wovyn_base {
                     "attrs": event:attrs
                 }
             )
+    }
+
+    rule send_temperature {
+        select when sensor report_requested
+        pre {
+            rcn = event:attrs{"rcn"}
+            returnEci = event:attrs{"returnEci"}
+        }
+        event:send(
+            {   "eci": returnEci, 
+                "eid": "current-temperature", 
+                "domain": "sensor_community", "type": "temperature_sent",
+                "attrs": {
+                    "rcn": rcn,
+                    "temperature" : ent:curr_temp || "No readings yet",
+                    "sensor_id" : profile:getSensorId()
+                }
+            }
+        )
     }
 }

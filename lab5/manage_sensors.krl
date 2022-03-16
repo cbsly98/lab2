@@ -13,7 +13,7 @@ ruleset manage_sensors {
                 username = ctx:rid_config{"username"}
                 password = ctx:rid_config{"password"}
                 fromNumber = ctx:rid_config{"fromNumber"}
-        shares showChildren, sensors, temperatures
+        shares showChildren, sensors, temperatures, getLastFiveReports
       }
 
     global {
@@ -26,7 +26,7 @@ ruleset manage_sensors {
         
         rulesetData = {
             "temperature_store" : {
-                "rulesetURI" : "https://raw.githubusercontent.com/cbsly98/lab2/main/lab3/temperature_store.krl",
+                "rulesetURI" : "file:///home/csly/Desktop/Winter2022/cs462/lab2/lab3/temperature_store.krl",
                 "rid" : "temperature_store"
             },
             "twilio" : {
@@ -80,6 +80,32 @@ ruleset manage_sensors {
             }).map(function(v, k) {
                 wrangler:picoQuery(v{"subscriptionTx"},"temperature_store","temperatures",{}, v{"host"})
             })
+        }
+
+        activeTemperatureSensors = function() {
+            ent:sensors.filter(function(v,k) {
+                v{"Tx_role"} == "temperatureSensor"
+            })
+        }
+
+        genCorrelationNumber = function() {
+            random:uuid()
+        }
+
+        getLastFiveReports = function() {
+            size = ent:reportRcn.length();
+            ent:reports.filter(function(v,k) {
+                ent:reportRcn.slice(0, (size < 5) => size - 1 | 4).any(function(x) {k == x})
+            })
+        }
+    }
+
+    rule init_vars {
+        select when wrangler ruleset_installed where event:attrs{"rids"} >< meta:rid
+        always {
+            ent:reportRcn := []
+            ent:reports := {}
+            ent:sensors := {}
         }
     }
 
@@ -186,6 +212,7 @@ ruleset manage_sensors {
             ent:sensors{[sensor_id, "subscriptionTx"]} := event:attrs{"Tx"}
             ent:sensors{[sensor_id, "Tx_role"]} := event:attrs{"Rx_role"}
             ent:sensors{[sensor_id, "subscriptionId"]} := event:attrs{"Id"}
+            ent:sensors{[sensor_id, "subscriptionRx"]} := event:attrs{["bus", "Rx"]}
         }
     }
 
@@ -215,4 +242,51 @@ ruleset manage_sensors {
         twilio:sendMessage(getPhoneNumber(), messageBody)
     }
 
+    rule request_report {
+        select when sensor_community report_requested
+        pre {
+            new_rcn = genCorrelationNumber();
+        }
+        always {
+            ent:reports{new_rcn} := {}.put(["temperature_sensors"], activeTemperatureSensors().length()).put(["responding"], 0).put(["temperatures"], {})
+            ent:reportRcn := [new_rcn].append(ent:reportRcn)
+            raise sensor_community event "report_started"
+                attributes { "rcn": new_rcn }
+        }
+    }
+
+    rule process_report {
+        select when sensor_community report_started
+        foreach activeTemperatureSensors() setting(sensor)
+        pre {
+            rcn = event:attrs{"rcn"}
+            subscriptionTx = sensor{"subscriptionTx"}
+            host = sensor{"host"}
+            rx = sensor{"subscriptionRx"}
+        }
+        if subscriptionTx then 
+            event:send(
+                {   "eci": subscriptionTx, 
+                    "eid": "get-temperature", 
+                    "domain": "sensor", "type": "report_requested",
+                    "attrs": {
+                        "rcn": rcn,
+                        "returnEci": rx
+                    }
+                }
+            )
+    }
+
+    rule receive_temperature {
+        select when sensor_community temperature_sent
+        pre {
+            rcn = event:attrs{"rcn"}
+            temperature = event:attrs{"temperature"}
+            sensor_id = event:attrs{"sensor_id"}
+        }
+        always {
+            ent:reports{[rcn, "temperatures", sensor_id]} := temperature
+            ent:reports{[rcn, "responding"]} := ent:reports{[rcn, "responding"]} + 1
+        }
+    }
 }
