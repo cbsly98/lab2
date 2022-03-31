@@ -44,6 +44,10 @@ ruleset manage_sensors {
             "emitter" : {
                 "rulesetURI" : "https://raw.githubusercontent.com/windley/temperature-network/main/io.picolabs.wovyn.emitter.krl",
                 "rid" : "io.picolabs.wovyn.emitter"
+            },
+            "gossip" : {
+                "rulesetURI" : "file:///home/csly/Desktop/Winter2022/cs462/lab2/lab8/gossip.krl",
+                "rid" : "gossip"
             }
         }
 
@@ -135,6 +139,7 @@ ruleset manage_sensors {
                 installRuleset(the_sensor.get("eci"), rulesetData{["sensor_profile", "rulesetURI"]}, rulesetData{["sensor_profile", "rid"]}, sensor_id);
                 installRuleset(the_sensor.get("eci"), rulesetData{["wovyn_base", "rulesetURI"]}, rulesetData{["wovyn_base", "rid"]}, sensor_id);
                 installRuleset(the_sensor.get("eci"), rulesetData{["emitter", "rulesetURI"]}, rulesetData{["emitter", "rid"]}, sensor_id);
+                installRuleset(the_sensor.get("eci"), rulesetData{["gossip", "rulesetURI"]}, rulesetData{["gossip", "rid"]}, sensor_id);
             }
           fired {
             ent:sensors{sensor_id} := the_sensor
@@ -288,5 +293,26 @@ ruleset manage_sensors {
             ent:reports{[rcn, "temperatures", sensor_id]} := temperature
             ent:reports{[rcn, "responding"]} := ent:reports{[rcn, "responding"]} + 1
         }
+    }
+
+    rule update_gossip_period {
+        select when sensor_community gossip_period_updated
+        foreach activeTemperatureSensors() setting(sensor)
+        pre {
+            period = event:attrs{"period"}
+            subscriptionTx = sensor{"subscriptionTx"}
+            host = sensor{"host"}
+            rx = sensor{"subscriptionRx"}
+        }
+        if subscriptionTx then 
+            event:send(
+                {   "eci": subscriptionTx, 
+                    "eid": "gossip-update-period", 
+                    "domain": "gossip", "type": "period_updated",
+                    "attrs": {
+                        "period": period
+                    }
+                }
+            )
     }
 }

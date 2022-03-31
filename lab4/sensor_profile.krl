@@ -75,9 +75,6 @@ ruleset sensor_profile {
           ent:subscriptions{[id, "Tx"]} := event:attr("Tx")
 
           ent:subscriptionTx := event:attr("Tx")
-        } else {
-          raise wrangler event "inbound_rejection"
-            attributes event:attrs
         }
       }
 
