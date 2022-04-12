@@ -7,7 +7,8 @@ ruleset gossip {
         author "Caleb Sly"
         use module io.picolabs.subscription alias subs
         use module io.picolabs.wrangler alias wrangler
-        shares seen, getNumFromMessageID, messages, peers, genMessageID, getType, getRumorPeer, seenSets, getRandomMessage, getRumorMessage, getAddedRumorPeer, getNextMessage, getSeenPeer
+        use module sensor_profile alias profile
+        shares seen, getNumFromMessageID, messages, peers, genMessageID, getType, getRumorPeer, seenSets, getRandomMessage, getRumorMessage, getAddedRumorPeer, getNextMessage, getSeenPeer, getViolations, getInViolation
       }
 
     global {
@@ -129,6 +130,18 @@ ruleset gossip {
             messageID = pico + ":" + number
             ent:messages{[pico, messageID]}
         }
+
+        getThreshold = function() {
+            profile:getProfileInformation(){"temperature_threshold"}
+        }
+
+        getViolations = function() {
+            ent:violations
+        }
+
+        getInViolation = function() {
+            ent:inViolation
+        }
     }
 
     rule init_vars {
@@ -143,6 +156,8 @@ ruleset gossip {
             ent:peers := {}
             schedule gossip event "heartbeat" repeat << */#{ent:period} * * * * * >>  attributes { } setting(id);
             ent:scheduleId := id;
+            ent:violations := 0;
+            ent:inViolation := false;
         }
     }
 
@@ -188,13 +203,18 @@ ruleset gossip {
             Temperature = event:attrs{"Temperature"}
             Timestamp = event:attrs{"Timestamp"}
             SequenceNumber = getNumFromMessageID(MessageID);
+            Payload = event:attrs{"Payload"}
         }
         if ent:go && MessageID then noop();
         fired {
+            //additional logic for violation rumor. affect number of violations if you haven't seen the message yet.
+            ent:violations := ent:violations + Payload if (Payload == 1 || Payload == -1) && ent:messages{[SensorID, MessageID]} == null
+            //generic logic
             ent:messages{[SensorID, MessageID]} := event:attrs.delete("_headers") if ent:messages{[SensorID, MessageID]} == null
             ent:seenSet{SensorID} := ent:seenSet{SensorID} || SequenceNumber if SequenceNumber == 0
             ent:seenSet{SensorID} := SequenceNumber if SequenceNumber == ent:seenSet{SensorID} + 1
             ent:seenSets{wrangler:myself(){"id"}} := ent:seenSet
+            
         }
     }
 
@@ -229,7 +249,6 @@ ruleset gossip {
                 ent:seenSets{[peer, SensorID]} := ent:seenSets{[peer, SensorID]} || newNum if newNum == 0
                 ent:seenSets{[peer, SensorID]} := newNum if newNum == oldNum + 1
             }
-
     }
 
     rule process_temperature {
@@ -319,6 +338,29 @@ ruleset gossip {
         if pico_id && pico_id != wrangler:myself(){"id"} then noop();
         fired {
             ent:peers{[pico_id, "channel"]} := event:attrs{"Rx"}
+        }
+    }
+
+    rule process_violations {
+        select when wovyn new_temperature_reading
+        pre {
+            temperature = event:attrs{"temperature"}
+        }
+        if temperature > getThreshold() then noop();
+        fired {
+            //raise message if transitioning to violation
+            message = {}.put(["MessageID"], genMessageID())
+                        .put(["SensorID"], wrangler:myself(){"id"})
+                        .put(["Payload"], 1)
+            raise gossip event "rumor" attributes message if not ent:inViolation
+            ent:inViolation := not ent:inViolation if not ent:inViolation
+        } else {
+            //raise message if transitioning to normal
+            message = {}.put(["MessageID"], genMessageID())
+                        .put(["SensorID"], wrangler:myself(){"id"})
+                        .put(["Payload"], -1)
+            raise gossip event "rumor" attributes message if ent:inViolation
+            ent:inViolation := not ent:inViolation if ent:inViolation
         }
     }
 
